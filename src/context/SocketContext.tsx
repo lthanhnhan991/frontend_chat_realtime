@@ -15,7 +15,7 @@ interface SocketContextType {
   leaveConversation: (conversationId: string) => void;
   emitTypingStart: (conversationId: string) => void;
   emitTypingStop: (conversationId: string) => void;
-  // Presence real-time — cập nhật ngay khi bất kỳ user nào đổi trạng thái
+  // presence real-time
   presenceMap: Record<string, UserPresence>;
 }
 
@@ -42,7 +42,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   const [presenceMap, setPresenceMap] = useState<Record<string, UserPresence>>({});
 
   useEffect(() => {
-    // Only connect if user is logged in
+    // only connect if user is logged in
     if (!user) {
       if (socket) {
         socket.disconnect();
@@ -52,27 +52,34 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
       return;
     }
 
-    const token = localStorage.getItem('accessToken');
     const SOCKET_URL = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:3000';
 
+    // cho phép bắt đầu bằng polling rồi nâng lên websocket (backend free có thể đang ngủ)
     const newSocket = io(SOCKET_URL, {
-      auth: { token },
+      auth: (cb) => cb({ token: localStorage.getItem('accessToken') }),
       withCredentials: true,
-      transports: ['websocket'],
+      transports: ['polling', 'websocket'],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 10000,
+      timeout: 20000,
     });
 
     newSocket.on('connect', () => {
-      console.log('Socket connected:', newSocket.id);
       setIsConnected(true);
     });
 
     newSocket.on('disconnect', () => {
-      console.log('Socket disconnected');
       setIsConnected(false);
     });
 
-    // Lắng nghe presence real-time — BE broadcast toàn cục mỗi khi 1 user đổi
-    // trạng thái (online/away/busy/offline) hoặc custom status message
+    // không throw ra ngoài, chỉ cập nhật trạng thái
+    newSocket.on('connect_error', () => {
+      setIsConnected(false);
+    });
+
+    // lắng nghe presence real-time
     newSocket.on('user_status_changed', (payload: {
       userId: string;
       status: UserPresence['status'];
@@ -96,7 +103,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     };
   }, [user]);
 
-  // Expose easy methods for components
+  // expose easy methods for components
   const joinConversation = (conversationId: string) => {
     if (socket && isConnected) {
       socket.emit('join_conversation', { conversationId });

@@ -35,7 +35,7 @@ const LoginForm: React.FC<LoginFormProps> = ({ onToggleForm }) => {
     <div className="flex flex-col w-full animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="mb-8">
         <h2 className="text-2xl font-black text-gray-900 tracking-tight">Đăng nhập</h2>
-        <p className="text-sm text-gray-500 mt-1">Chào mừng bạn quay trở lại với Zalo Hybrid.</p>
+        <p className="text-sm text-gray-500 mt-1">Chào mừng bạn quay trở lại với Silverflow.</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">
@@ -91,7 +91,7 @@ const LoginForm: React.FC<LoginFormProps> = ({ onToggleForm }) => {
 
       <div className="mt-8 pt-6 border-t border-gray-50 text-center">
         <p className="text-sm text-gray-500 font-medium">
-          Bạn mới sử dụng Zalo Hybrid?{' '}
+          Bạn mới sử dụng Silverflow?{' '}
           <button 
             onClick={onToggleForm}
             className="text-blue-600 font-black hover:underline ml-1"

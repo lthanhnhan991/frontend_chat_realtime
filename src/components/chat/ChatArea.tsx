@@ -43,8 +43,8 @@ interface ChatAreaProps {
     activeChat: string | null;
     onClose?: () => void;
     onOpenInfo?: () => void;
-    onStartCall?: (callType: 'voice' | 'video') => void;
-    onStartGroupCall?: (callType: 'voice' | 'video') => void;
+    onStartCall?: () => void;
+    onStartGroupCall?: () => void;
     isPrivateChat?: boolean;
     isGroupChat?: boolean;
 }
@@ -73,8 +73,7 @@ const formatCallDuration = (seconds: number): string => {
     return `${m}:${s}`;
 };
 
-// Format "hoạt động lần cuối" kiểu tương đối — dùng cho header ChatArea khi
-// người đang chat đã offline (tôn trọng privacy đã check ở BE/presenceMap)
+// format "hoạt động lần cuối" kiểu tương đối
 const formatLastSeen = (dateStr: string | null | undefined): string | null => {
     if (!dateStr) return null;
     const date = new Date(dateStr);
@@ -92,32 +91,28 @@ const formatLastSeen = (dateStr: string | null | undefined): string | null => {
 const renderCallMessage = (
     msg: any,
     isMine: boolean,
-    onStartCall?: (type: 'voice' | 'video') => void,
-    onStartGroupCall?: (type: 'voice' | 'video') => void,
+    onStartCall?: () => void,
+    onStartGroupCall?: () => void,
 ) => {
     const status = msg.callInfo?.status as 'ended' | 'missed' | 'cancelled' | 'started' | undefined;
-    const callType = msg.callInfo?.callType as 'voice' | 'video' | undefined;
     const duration = msg.callInfo?.duration as number | undefined;
 
-    const isVideo = callType === 'video';
     const isMissed = status === 'missed';
     const isCancelled = status === 'cancelled';
     const isEnded = status === 'ended';
-    const isStarted = status === 'started'; // group call đang diễn ra
+    const isStarted = status === 'started';
 
     const Icon = isMissed
         ? PhoneMissed
         : isCancelled
         ? PhoneOff
-        : isVideo
-        ? Video
         : Phone;
 
     const statusText = {
-        ended: isVideo ? 'Cuộc gọi video nhóm' : 'Cuộc gọi thoại nhóm',
-        missed: isVideo ? 'Cuộc gọi video nhỡ' : 'Cuộc gọi thoại nhỡ',
-        cancelled: isVideo ? 'Cuộc gọi video đã huỷ' : 'Cuộc gọi thoại đã huỷ',
-        started: isVideo ? 'Cuộc gọi video nhóm đang diễn ra' : 'Cuộc gọi thoại nhóm đang diễn ra',
+        ended: 'Cuộc gọi thoại',
+        missed: 'Cuộc gọi thoại nhỡ',
+        cancelled: 'Cuộc gọi thoại đã huỷ',
+        started: 'Cuộc gọi thoại nhóm đang diễn ra',
     }[status ?? 'ended'] ?? msg.content;
 
     const iconBg = isMine
@@ -130,7 +125,6 @@ const renderCallMessage = (
 
     return (
         <div className="flex flex-col gap-2 py-0.5 min-w-[180px]">
-            {/* Icon + text */}
             <div className="flex items-center gap-2.5">
                 <div className={`p-2 rounded-full ${iconBg} flex-shrink-0`}>
                     <Icon size={15} className={iconColor} />
@@ -156,11 +150,10 @@ const renderCallMessage = (
                     ) : null}
                 </div>
             </div>
-            {/* Nút gọi lại — chỉ hiện khi là private chat và có onStartCall */}
-            {/* Nút Gọi lại (private) hoặc Tham gia (group started) */}
+            {/* gọi lại (chat riêng) hoặc tham gia (nhóm đang gọi) */}
             {isStarted && onStartGroupCall ? (
                 <button
-                    onClick={() => onStartGroupCall(callType ?? 'voice')}
+                    onClick={() => onStartGroupCall()}
                     className={`w-full py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5
                         ${isMine
                             ? 'bg-green-500/30 hover:bg-green-500/50 text-green-200'
@@ -172,14 +165,14 @@ const renderCallMessage = (
                 </button>
             ) : !isStarted && onStartCall ? (
                 <button
-                    onClick={() => onStartCall(callType ?? 'voice')}
+                    onClick={() => onStartCall()}
                     className={`w-full py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5
                         ${isMine
                             ? 'bg-white/15 hover:bg-white/25 text-white'
                             : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
                         }`}
                 >
-                    {isVideo ? <Video size={12} /> : <Phone size={12} />}
+                    <Phone size={12} />
                     Gọi lại
                 </button>
             ) : null}
@@ -189,7 +182,7 @@ const renderCallMessage = (
 
 const renderMessageContent = (content: string, isMine: boolean) => {
     if (!content) return null;
-    // Regex to match @ followed by characters until space or end of string, supporting Vietnamese
+    // regex to match @ followed by characters until space or end of string
     const parts = content.split(/(@[^\s@]+)/g);
     return (
         <>
@@ -246,7 +239,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     const [forwardMsg, setForwardMsg] = useState<Message | null>(null);
     const [forwardTargets, setForwardTargets] = useState<string[]>([]);
 
-    // Search state
+    // search state
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [searchResults, setSearchResults] = useState<Message[]>([]);
@@ -277,8 +270,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
-    // Lưu vị trí scroll TRƯỚC khi load tin nhắn cũ, để restore sau khi prepend
-    // — tránh giật màn hình (content mới chèn phía trên làm view bị đẩy xuống)
+    // lưu vị trí scroll TRƯỚC khi load tin nhắn cũ, để restore sau khi prepend
     const prevScrollHeightRef = useRef(0);
     const prevScrollTopRef = useRef(0);
     const shouldRestoreScrollRef = useRef(false);
@@ -292,8 +284,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 payload.attachments &&
                 (!msg.attachments || msg.attachments.length === 0)
             ) {
-                // Chuẩn hóa thành mảng — BE có thể trả 1 object đơn (voice) hoặc
-                // mảng (file/media), tránh bug msg.attachments?.[0] ra undefined
+                // chuẩn hóa thành mảng
                 const normalizedAttachments = Array.isArray(payload.attachments)
                     ? payload.attachments
                     : [payload.attachments];
@@ -312,11 +303,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         [activeChat, user?.sub],
     );
 
-    // Gộp linkPreviews vào message đã tồn tại theo messageId (không tạo message mới)
+    // gộp linkPreviews vào message đã tồn tại theo messageId (không tạo message mới)
     const handleLinkPreview = useCallback((payload: any[]) => {
         if (!Array.isArray(payload) || payload.length === 0) return;
 
-        // Nhóm theo messageId — 1 message có thể có nhiều link
+        // nhóm theo messageId
         const byMessageId = payload.reduce<Record<string, any[]>>((acc, lp) => {
             const mid = (lp.messageId?._id || lp.messageId)?.toString();
             if (!mid) return acc;
@@ -329,7 +320,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             prev.map((m) => {
                 const links = byMessageId[m._id];
                 if (!links) return m;
-                // Merge, tránh trùng theo url
+                // merge, tránh trùng theo url
                 const existingUrls = new Set((m.linkPreviews || []).map((l: any) => l.url));
                 const newLinks = links.filter((l) => !existingUrls.has(l.url));
                 if (newLinks.length === 0) return m;
@@ -472,7 +463,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         if (isTyping) scrollToBottom("smooth");
     }, [isTyping, scrollToBottom]);
 
-    // Mark as seen when opening chat
+    // mark as seen when opening chat
     useEffect(() => {
         if (activeChat) messageService.markAsSeen(activeChat).catch(() => {});
     }, [activeChat]);
@@ -508,7 +499,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     const loadMore = useCallback(async () => {
         if (!hasMore || loadingMore || !nextCursor) return;
 
-        // Capture vị trí scroll TRƯỚC khi thêm tin nhắn cũ vào đầu danh sách
+        // capture vị trí scroll TRƯỚC khi thêm tin nhắn cũ vào đầu danh sách
         const container = messagesContainerRef.current;
         if (container) {
             prevScrollHeightRef.current = container.scrollHeight;
@@ -532,8 +523,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         }
     }, [hasMore, loadingMore, nextCursor, activeChat]);
 
-    // Restore vị trí scroll sau khi DOM đã render tin nhắn cũ mới thêm vào
-    // — giữ nguyên tin nhắn đang xem trên màn hình, không bị nhảy xuống dưới
+    // restore vị trí scroll sau khi DOM đã render tin nhắn cũ mới thêm vào
     useEffect(() => {
         if (shouldRestoreScrollRef.current && messagesContainerRef.current) {
             const container = messagesContainerRef.current;
@@ -544,11 +534,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         }
     }, [messages]);
 
-    // Auto-trigger load more khi scroll gần lên đầu danh sách (infinite scroll)
+    // auto-trigger load more khi scroll gần lên đầu danh sách (infinite scroll)
     const handleMessagesScroll = useCallback(
         (e: React.UIEvent<HTMLDivElement>) => {
             const el = e.currentTarget;
-            // Cách đầu 120px thì bắt đầu tải thêm — đủ sớm để mượt, không tải dư thừa
+            // cách đầu 120px thì bắt đầu tải thêm
             if (el.scrollTop < 120 && hasMore && !loadingMore) {
                 loadMore();
             }
@@ -592,8 +582,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
         setIsSending(true);
         try {
-            // Extract mention IDs from the current message content to be safe
-            // Alternatively, we can use the mentionIds set we built during typing
+            // extract mention IDs from the current message content to be safe
             const currentMentions = Array.from(mentionIds).filter((id) => {
                 const p = conversationInfo?.participants?.find(
                     (p: any) => p.userId?._id === id,
@@ -921,10 +910,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         } else {
             setNewMessage(val);
 
-            // Mention logic
+            // mention logic
             const cursor = e.target.selectionStart || 0;
             const textBefore = val.slice(0, cursor);
-            // Support Vietnamese and characters other than space/@
+            // support Vietnamese and characters other than space/@
             const mentionMatch = textBefore.match(/@([^@\s]*)$/);
 
             if (mentionMatch && conversationInfo?.type === "group") {
@@ -982,8 +971,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         (p: any) => p.userId?._id === user?.sub,
     )?.role;
 
-    // Presence real-time — ưu tiên dữ liệu socket mới nhất, fallback về
-    // snapshot lúc fetch conversation (đề phòng chưa nhận được socket event nào)
+    // presence real-time
     const otherPresence = headerOther
         ? presenceMap[headerOther._id] ?? {
               status: headerOther.status ?? "offline",
@@ -1028,11 +1016,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 setEmojiPickerMsg(null);
             }}
         >
-            {/* Header */}
+            {/* header */}
             <header className="h-16 px-5 bg-white border-b border-gray-100 flex items-center justify-between flex-shrink-0 shadow-sm z-10">
                 <div className="flex items-center gap-3">
-                    {/* Nút quay lại — chỉ hiện trên mobile, desktop luôn thấy
-                        cả list bên trái nên không cần nút này */}
+                    {/* nút quay lại */}
                     <button
                         type="button"
                         onClick={() => onClose?.()}
@@ -1101,43 +1088,25 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                     >
                         <Search size={18} />
                     </button>
-                    {/* Private chat: gọi 1-1 */}
+                    {/* gọi thoại 1-1 */}
                     {isPrivate && (
-                        <>
-                            <button
-                                onClick={() => onStartCall?.('voice')}
-                                className="p-2 text-gray-500 hover:bg-green-100 hover:text-green-600 rounded-full transition-colors"
-                                title="Gọi thoại"
-                            >
-                                <Phone size={18} />
-                            </button>
-                            <button
-                                onClick={() => onStartCall?.('video')}
-                                className="p-2 text-gray-500 hover:bg-blue-100 hover:text-blue-600 rounded-full transition-colors"
-                                title="Gọi video"
-                            >
-                                <Video size={18} />
-                            </button>
-                        </>
+                        <button
+                            onClick={() => onStartCall?.()}
+                            className="p-2 text-gray-500 hover:bg-green-100 hover:text-green-600 rounded-full transition-colors"
+                            title="Gọi thoại"
+                        >
+                            <Phone size={18} />
+                        </button>
                     )}
-                    {/* Group chat: gọi nhóm */}
+                    {/* gọi thoại nhóm */}
                     {isGroupChat && (
-                        <>
-                            <button
-                                onClick={() => onStartGroupCall?.('voice')}
-                                className="p-2 text-gray-500 hover:bg-green-100 hover:text-green-600 rounded-full transition-colors"
-                                title="Gọi thoại nhóm"
-                            >
-                                <Phone size={18} />
-                            </button>
-                            <button
-                                onClick={() => onStartGroupCall?.('video')}
-                                className="p-2 text-gray-500 hover:bg-blue-100 hover:text-blue-600 rounded-full transition-colors"
-                                title="Gọi video nhóm"
-                            >
-                                <Video size={18} />
-                            </button>
-                        </>
+                        <button
+                            onClick={() => onStartGroupCall?.()}
+                            className="p-2 text-gray-500 hover:bg-green-100 hover:text-green-600 rounded-full transition-colors"
+                            title="Gọi thoại nhóm"
+                        >
+                            <Phone size={18} />
+                        </button>
                     )}
                     <div className="w-px h-5 bg-gray-200 mx-1" />
                     <button
@@ -1228,7 +1197,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 </div>
             </header>
 
-            {/* Search Bar */}
+            {/* search Bar */}
             {isSearchOpen && (
                 <div className="bg-white border-b border-gray-100 p-3 animate-in slide-in-from-top-2 z-10 shadow-sm">
                     <form onSubmit={handleSearch} className="flex gap-2">
@@ -1296,7 +1265,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 </div>
             )}
 
-            {/* Pinned Messages Bar */}
+            {/* pinned Messages Bar */}
             {pinnedMessages.length > 0 && showPinnedBar && (
                 <div className="bg-white border-b border-gray-100 px-4 py-2 flex items-center justify-between animate-in slide-in-from-top-1 z-0 shadow-sm">
                     <div
@@ -1352,14 +1321,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 </div>
             )}
 
-            {/* Messages — infinite scroll: tự động tải tin nhắn cũ khi cuộn gần lên đầu */}
+            {/* messages */}
             <div
                 ref={messagesContainerRef}
                 onScroll={handleMessagesScroll}
                 className="flex-1 overflow-y-auto px-4 py-4 space-y-1 bg-[#f0f4ff]/30"
             >
-                {/* Spinner nhỏ khi đang tải tin nhắn cũ — nằm trong luồng scroll,
-                    không phải nút bấm cố định như trước */}
+                {/* spinner nhỏ khi đang tải tin nhắn cũ */}
                 {hasMore && (
                     <div className="flex justify-center py-2">
                         {loadingMore ? (
@@ -1469,7 +1437,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                                                     {msg.senderId?.name}
                                                 </span>
                                             )}
-                                        {/* Reply preview */}
+                                        {/* reply preview */}
                                         {msg.replyTo && (
                                             <div
                                                 className={`mb-1 px-3 py-1.5 rounded-lg border-l-2 border-blue-400 bg-blue-50/80 text-xs text-gray-500 max-w-xs`}
@@ -1482,7 +1450,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                                                 </div>
                                             </div>
                                         )}
-                                        {/* Bubble */}
+                                        {/* bubble */}
                                         <div
                                             className={`relative px-4 py-2.5 rounded-2xl shadow-sm transition-all ${
                                                 isMine
@@ -1663,7 +1631,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                                                             isMine,
                                                         )}
                                                     </span>
-                                                    {/* Link Previews */}
+                                                    {/* link Previews */}
                                                     {!msg.isDeleted &&
                                                         msg.linkPreviews &&
                                                         msg.linkPreviews
@@ -1744,7 +1712,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                                                 </span>
                                             )}
 
-                                            {/* Hover action bar */}
+                                            {/* hover action bar */}
                                             {!msg.isDeleted && (
                                                 <div
                                                     className={`absolute -top-7 ${isMine ? "right-0" : "left-0"} hidden group-hover:flex bg-white rounded-full shadow-md border border-gray-100 px-1 py-0.5 gap-0.5 z-20`}
@@ -1819,7 +1787,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                                                 </div>
                                             )}
 
-                                            {/* Emoji picker */}
+                                            {/* emoji picker */}
                                             {emojiPickerMsg === msg._id && (
                                                 <div
                                                     className={`absolute z-40 ${isMine ? "right-0" : "left-0"} bottom-full mb-1 bg-white rounded-full shadow-xl border border-gray-100 px-2 py-1 flex gap-1`}
@@ -1845,7 +1813,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                                             )}
                                         </div>
 
-                                        {/* Reactions */}
+                                        {/* reactions */}
                                         {Object.keys(grouped).length > 0 && (
                                             <div
                                                 className={`flex flex-wrap gap-0.5 mt-0.5 ${isMine ? "justify-end" : "justify-start"}`}
@@ -1891,7 +1859,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                                             </div>
                                         )}
 
-                                        {/* Time + seen */}
+                                        {/* time + seen */}
                                         <div
                                             className={`flex items-center gap-1 mt-0.5 ${isMine ? "flex-row-reverse" : "flex-row"}`}
                                         >
@@ -1942,7 +1910,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                     })
                 )}
 
-                {/* Typing indicator */}
+                {/* typing indicator */}
                 {isTyping && (
                     <div className="flex justify-start">
                         <div className="bg-white px-4 py-2.5 rounded-2xl shadow-sm border border-gray-100 flex gap-1 items-center rounded-bl-sm">
@@ -1959,7 +1927,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 <div ref={messagesEndRef} />
             </div>
 
-            {/* Mention Jump Button */}
+            {/* mention Jump Button */}
             {mentionIndices.length > 0 && (
                 <button
                     onClick={jumpToMention}
@@ -1975,7 +1943,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 </button>
             )}
 
-            {/* Context menu */}
+            {/* context menu */}
             {contextMenu && contextMenu.x > 0 && (
                 <div
                     className="fixed bg-white border border-gray-100 shadow-xl rounded-xl py-1.5 w-48 z-50 animate-in fade-in zoom-in-95"
@@ -2060,7 +2028,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 </div>
             )}
 
-            {/* Reply/Edit/Files Queue banner */}
+            {/* reply/Edit/Files Queue banner */}
             {(replyTo || editingMsg || filesQueue.length > 0) && (
                 <div className="px-4 py-2 bg-blue-50 border-t border-blue-100 flex items-center justify-between animate-in slide-in-from-bottom-2">
                     <div className="flex flex-col gap-1 flex-1 min-w-0">
@@ -2158,7 +2126,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 </div>
             )}
 
-            {/* Input */}
+            {/* input */}
             <div className="px-4 py-3 bg-white border-t border-gray-100 flex-shrink-0 relative">
                 <input
                     ref={fileInputRef}
@@ -2279,7 +2247,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                             className="flex-1 px-4 py-2.5 bg-gray-100 focus:bg-white rounded-xl border border-transparent focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 outline-none text-sm transition-all"
                             disabled={isSending}
                         />
-                        {/* Voice recording button */}
+                        {/* voice recording button */}
                         <button
                             type="button"
                             onClick={startVoiceRecording}
@@ -2308,7 +2276,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                     </form>
                 )}
 
-                {/* Mention List */}
+                {/* mention List */}
                 {showMentionList && conversationInfo?.type === "group" && (
                     <div className="absolute bottom-full left-4 mb-2 w-72 bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.2)] border border-gray-100 py-2 z-[60] animate-in slide-in-from-bottom-2">
                         <div className="px-4 py-2 text-[10px] font-black text-blue-600 uppercase tracking-widest border-b border-gray-50 mb-1">
@@ -2364,7 +2332,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 )}
             </div>
 
-            {/* Forward Modal */}
+            {/* forward Modal */}
             {forwardMsg && (
                 <div
                     className="absolute inset-0 bg-black/30 z-50 flex items-center justify-center"
@@ -2453,7 +2421,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 </div>
             )}
 
-            {/* Image Viewer Modal */}
+            {/* image Viewer Modal */}
             {imageViewer && (
                 <div
                     className="fixed inset-0 z-[100] bg-black/95 flex flex-col"

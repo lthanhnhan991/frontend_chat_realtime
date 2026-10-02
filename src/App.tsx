@@ -1,11 +1,22 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import AuthPage from "./pages/AuthPage";
-import ChatPage from "./pages/ChatPage";
-import ChatPlaceholder from "./pages/ChatPlaceholder";
-import ChatContent from "./pages/ChatContent";
-import ContactsPage from "./pages/ContactsPage";
+import { Suspense, lazy } from "react";
+import { Loader2 } from "lucide-react";
 import { Toaster } from "react-hot-toast";
 import { useAuth } from "./context/AuthContext";
+
+// tải theo route (lazy)
+const AuthPage       = lazy(() => import("./pages/AuthPage"));
+const ChatPage       = lazy(() => import("./pages/ChatPage"));
+const ChatPlaceholder = lazy(() => import("./pages/ChatPlaceholder"));
+const ChatContent    = lazy(() => import("./pages/ChatContent"));
+const ContactsPage   = lazy(() => import("./pages/ContactsPage"));
+
+// màn hình chờ khi đang tải 1 chunk
+const RouteLoading = () => (
+    <div className="h-dvh w-full flex items-center justify-center bg-white">
+        <Loader2 className="animate-spin text-blue-600" size={28} />
+    </div>
+);
 
 // bo bao ve tuyen duong can dang nhap
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -42,6 +53,7 @@ function App() {
                         },
                     }}
                 />
+                <Suspense fallback={<RouteLoading />}>
                 <Routes>
                     {/* tuyen duong cong khai */}
                     <Route
@@ -53,7 +65,7 @@ function App() {
                         }
                     />
 
-                    {/* tuyen duong chinh: chatPage la layout shell, cac trang con render qua outlet */}
+                    {/* tuyen duong chinh */}
                     <Route
                         path="/chat"
                         element={
@@ -94,6 +106,7 @@ function App() {
                         element={<Navigate to="/" replace />}
                     />
                 </Routes>
+                </Suspense>
             </div>
         </BrowserRouter>
     );

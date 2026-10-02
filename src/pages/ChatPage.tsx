@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense, lazy } from "react";
 import { useParams, useLocation, useNavigate, Outlet } from "react-router-dom";
 import { conversationService } from "../services/conversationService";
 import { userService } from "../services/userService";
@@ -6,11 +6,8 @@ import toast from "react-hot-toast";
 import { useAuth } from "../context/AuthContext";
 import SettingsModal from "../components/chat/SettingsModal";
 import SidebarPrimary from "../components/chat/SidebarPrimary";
-import CallModal from "../components/chat/CallModal";
-import GroupCallModal from "../components/chat/GroupCallModal";
 import { useGroupCallSocket } from "../hooks/useGroupCallSocket";
 import { useCallSocket } from "../hooks/useCallSocket";
-import type { CallType } from "../hooks/useCallSocket";
 import SidebarSecondary from "../components/chat/SidebarSecondary";
 import CreateGroupModal from "../components/chat/CreateGroupModal";
 import CreatePrivateChatModal from "../components/chat/CreatePrivateChatModal";
@@ -20,6 +17,10 @@ import { useFriendSocket } from "../hooks/useFriendSocket";
 import { useGlobalNotifications } from "../hooks/useGlobalNotifications";
 import { useSocket } from "../context/SocketContext";
 import { friendService } from "../services/friendService";
+
+// tải CallModal/GroupCallModal theo yêu cầu (lazy) thay vì gộp luôn vào bundle
+const CallModal = lazy(() => import("../components/chat/CallModal"));
+const GroupCallModal = lazy(() => import("../components/chat/GroupCallModal"));
 
 const ChatPage: React.FC = () => {
     const { logout, user } = useAuth();
@@ -35,20 +36,18 @@ const ChatPage: React.FC = () => {
         ? "contacts"
         : "chats";
     const activeChat = chatId || null;
-    // Trên mobile: coi /friends cũng là "trang chi tiết" giống 1 cuộc trò
-    // chuyện — ẩn list bên trái, chỉ hiện ContactsView full màn hình
+    // trên mobile, /friends cũng là trang chi tiết (ẩn danh sách bên trái)
     const showDetail = !!activeChat || location.pathname.startsWith("/friends");
 
     const [prevActiveChat, setPrevActiveChat] = useState<string | null>(null);
     const [unreadMentions, setUnreadMentions] = useState<Set<string>>(new Set());
     const [pendingFriendCount, setPendingFriendCount] = useState(0);
-    // Call state
+    // trạng thái cuộc gọi
     const [groupCallModal, setGroupCallModal] = useState<{
         conversationId: string;
         conversationName: string;
-        callType: 'voice' | 'video';
-        incoming?: { callId: string; hostId: string; callType: 'voice' | 'video' };
-        outgoing?: { callType: 'voice' | 'video' };
+        incoming?: { callId: string; hostId: string };
+        outgoing?: boolean;
     } | null>(null);
 
     const [callModal, setCallModal] = useState<{
@@ -57,21 +56,19 @@ const ChatPage: React.FC = () => {
             calleeName: string;
             calleeAvatar?: string | null;
             conversationId: string;
-            callType: CallType;
         };
         incoming?: {
             callId: string;
             callerId: string;
             callerName: string;
             callerAvatar?: string | null;
-            callType: CallType;
             conversationId: string;
         };
     } | null>(null);
 
-    // Map conversationId -> số pending join requests chưa xem
+    // map conversationId -> số pending join requests chưa xem
     const [pendingGroupRequests, setPendingGroupRequests] = useState<Record<string, number>>({});
-    // Trigger reload ConversationPanel pending list khi socket fire
+    // trigger reload ConversationPanel pending list khi socket fire
     const [reloadPendingTrigger, setReloadPendingTrigger] = useState(0);
 
     useGlobalNotifications(
@@ -90,18 +87,17 @@ const ChatPage: React.FC = () => {
     const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
     const [isCreatePrivateOpen, setIsCreatePrivateOpen] = useState(false);
     const [isPanelOpen, setIsPanelOpen] = useState(false);
-    // Avatar của chính mình — AuthContext.user chỉ decode từ JWT (không có
-    // avatar), nên cần fetch riêng để hiện đúng ảnh đại diện trên SidebarPrimary
+    // avatar của chính mình
     const [myAvatarUrl, setMyAvatarUrl] = useState<string | null>(null);
 
-    // Fetch pending friend requests count on mount
+    // fetch pending friend requests count on mount
     useEffect(() => {
         friendService.getFriendRequests()
             .then((data) => setPendingFriendCount(data?.length ?? 0))
             .catch(() => {});
     }, []);
 
-    // Fetch avatar của chính mình lúc mount — dùng cho SidebarPrimary
+    // fetch avatar của chính mình lúc mount
     const fetchMyAvatar = () => {
         if (!user?.sub) return;
         userService
@@ -115,7 +111,7 @@ const ChatPage: React.FC = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.sub]);
 
-    // Reset badge khi user vào tab contacts
+    // reset badge khi user vào tab contacts
     useEffect(() => {
         if (currentView === "contacts") {
             setPendingFriendCount(0);
@@ -137,17 +133,13 @@ const ChatPage: React.FC = () => {
 
     useEffect(() => {
         const init = async () => {
-            // Gộp 2 lần gọi getConversations() thành 1 — trước đây
-            // fetchConversations() và restorePendingGroupBadges() mỗi cái gọi
-            // riêng lúc mount, bắn gần như đồng thời + Promise.all song song
-            // listJoinRequests cho từng group → dễ vượt rate limit (429 storm)
-            // ngay lúc khởi động app, gây đứng/lag đặc biệt rõ trên mobile
+            // gộp 2 lần gọi getConversations() thành 1
             const data = await fetchConversations();
             const groups = (data || []).filter((c: any) => c.type === "group");
             if (groups.length === 0) return;
 
             const counts: Record<string, number> = {};
-            // Chạy tuần tự thay vì Promise.all để tránh burst request cùng lúc
+            // chạy tuần tự thay vì Promise.all để tránh burst request cùng lúc
             for (const g of groups) {
                 try {
                     const requests = await conversationService.listJoinRequests(g._id);
@@ -155,7 +147,7 @@ const ChatPage: React.FC = () => {
                         counts[g._id] = requests.length;
                     }
                 } catch {
-                    // Bỏ qua nếu lỗi (không đủ quyền hoặc network)
+                    // bỏ qua nếu lỗi (không đủ quyền hoặc network)
                 }
             }
             if (Object.keys(counts).length > 0) {
@@ -174,20 +166,19 @@ const ChatPage: React.FC = () => {
         }
     }, [isConnected, conversations, joinConversation]);
 
-    // Lắng nghe incoming GROUP call
+    // nhóm bắt đầu gọi
     useGroupCallSocket({
         onStarted: (payload) => {
-            // Nhận thông báo nhóm bắt đầu gọi — chỉ mở nếu chưa đang gọi
+            // chỉ mở nếu mình chưa đang trong cuộc gọi nào
+            if (payload.hostId === user?.sub) return;
             if (callModal === null && groupCallModal === null) {
                 const conv = conversations.find((c: any) => c._id === payload.conversationId);
                 setGroupCallModal({
                     conversationId: payload.conversationId,
                     conversationName: conv?.name ?? 'Cuộc gọi nhóm',
-                    callType: payload.callType,
                     incoming: {
                         callId: payload.callId,
                         hostId: payload.hostId,
-                        callType: payload.callType,
                     },
                 });
             }
@@ -200,7 +191,7 @@ const ChatPage: React.FC = () => {
         onIceCandidate: () => {},
     });
 
-    // Lắng nghe incoming call toàn cục — chỉ mở modal khi chưa có call
+    // có người gọi đến (chỉ mở khi mình chưa có cuộc gọi)
     useCallSocket({
         onIncoming: (payload) => {
             if (callModal === null) {
@@ -210,7 +201,6 @@ const ChatPage: React.FC = () => {
                         callerId: payload.callerId ?? '',
                         callerName: payload.callerInfo?.name ?? 'Người dùng',
                         callerAvatar: payload.callerInfo?.avatar ?? null,
-                        callType: payload.callType,
                         conversationId: payload.conversationId ?? '',
                     },
                 });
@@ -241,17 +231,17 @@ const ChatPage: React.FC = () => {
         onRequestHandled: (payload) => {
             const cid = payload?.conversationId;
             if (!cid) return;
-            // Xóa badge pending cho conversation này
+            // xóa badge pending cho conversation này
             setPendingGroupRequests(prev => {
                 const next = { ...prev };
                 delete next[cid];
                 return next;
             });
-            // Trigger reload pending list trong ConversationPanel
+            // trigger reload pending list trong ConversationPanel
             setReloadPendingTrigger(prev => prev + 1);
         },
         onForceLeave: (cid, reason) => {
-            // Nếu đang mở đúng conversation bị xóa/rời/giải tán → navigate ra
+            // nếu đang mở đúng hội thoại bị xóa/rời/giải tán thì thoát ra
             if (activeChat === cid || window.location.pathname.includes(cid)) {
                 if (reason === 'dissolved') {
                     toast.error("Nhóm đã bị giải tán");
@@ -268,7 +258,7 @@ const ChatPage: React.FC = () => {
     useFriendSocket({
         onUpdate: fetchConversations,
         onReceived: () => {
-            // Chỉ tăng badge nếu user không đang ở tab contacts
+            // chỉ tăng badge nếu user không đang ở tab contacts
             if (currentView !== "contacts") {
                 setPendingFriendCount((prev) => prev + 1);
             }
@@ -350,7 +340,7 @@ const ChatPage: React.FC = () => {
                             next.delete(id);
                             return next;
                         });
-                        // Reset pending group request badge khi mở conversation đó
+                        // reset pending group request badge khi mở conversation đó
                         setPendingGroupRequests(prev => {
                             const next = { ...prev };
                             delete next[id];
@@ -368,7 +358,7 @@ const ChatPage: React.FC = () => {
                 />
             }
         >
-            {/* Sub-routing outlet */}
+            {/* sub-routing outlet */}
             <Outlet
                 context={{
                     activeChat,
@@ -381,11 +371,11 @@ const ChatPage: React.FC = () => {
                     handleOpenInfo,
                     pendingGroupRequests,
                     reloadPendingTrigger,
-                    startCall: (params: { calleId: string; calleeName: string; calleeAvatar?: string | null; conversationId: string; callType: 'voice' | 'video' }) => {
+                    startCall: (params: { calleId: string; calleeName: string; calleeAvatar?: string | null; conversationId: string }) => {
                         setCallModal({ outgoing: params });
                     },
-                    startGroupCall: (params: { conversationId: string; conversationName: string; callType: 'voice' | 'video' }) => {
-                        setGroupCallModal({ ...params, outgoing: { callType: params.callType } });
+                    startGroupCall: (params: { conversationId: string; conversationName: string }) => {
+                        setGroupCallModal({ ...params, outgoing: true });
                     },
                     clearPendingGroupRequests: (cid: string) =>
                         setPendingGroupRequests(prev => {
@@ -397,17 +387,12 @@ const ChatPage: React.FC = () => {
             />
         </ChatLayout>
 
-        {/* Modals — render NGOÀI ChatLayout để tránh bị ẩn bởi mobile layout.
-            Trước đây nằm bên trong <ChatLayout> → bên trong <main> có class
-            'hidden md:flex' khi showDetail=false → modals bị hidden trên mobile
-            dù z-index cao (vì parent element hidden = toàn bộ subtree ẩn). */}
+        {/* modals */}
         {isSettingsOpen && (
             <SettingsModal
                 onClose={() => {
                     setIsSettingsOpen(false);
-                    // Đóng modal xong thì refetch avatar — nếu vừa đổi ảnh
-                    // đại diện, SidebarPrimary sẽ cập nhật ngay không cần
-                    // đăng nhập lại
+                    // đóng modal xong thì refetch avatar
                     fetchMyAvatar();
                 }}
             />
@@ -429,26 +414,30 @@ const ChatPage: React.FC = () => {
             />
         )}
 
-        {/* 1-1 Call Modal */}
+        {/* cuộc gọi 1-1 */}
         {callModal !== null && (
-            <CallModal
-                outgoing={callModal.outgoing}
-                incoming={callModal.incoming}
-                onClose={() => setCallModal(null)}
-            />
+            <Suspense fallback={null}>
+                <CallModal
+                    outgoing={callModal.outgoing}
+                    incoming={callModal.incoming}
+                    onClose={() => setCallModal(null)}
+                />
+            </Suspense>
         )}
 
-        {/* Group Call Modal */}
+        {/* cuộc gọi nhóm */}
         {groupCallModal !== null && (
-            <GroupCallModal
-                conversationId={groupCallModal.conversationId}
-                conversationName={groupCallModal.conversationName}
-                currentUserId={user?.sub ?? ''}
-                currentUserName={user?.name ?? 'Bạn'}
-                incoming={groupCallModal.incoming}
-                outgoing={groupCallModal.outgoing}
-                onClose={() => setGroupCallModal(null)}
-            />
+            <Suspense fallback={null}>
+                <GroupCallModal
+                    conversationId={groupCallModal.conversationId}
+                    conversationName={groupCallModal.conversationName}
+                    currentUserId={user?.sub ?? ''}
+                    currentUserName={user?.name ?? 'Bạn'}
+                    incoming={groupCallModal.incoming}
+                    outgoing={groupCallModal.outgoing}
+                    onClose={() => setGroupCallModal(null)}
+                />
+            </Suspense>
         )}
         </>
     );
